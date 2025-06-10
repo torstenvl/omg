@@ -10,6 +10,22 @@
  * per-terminal definitions are in special header files.
  */
 
+#if !defined(MG__APPLE__H__) && defined(__APPLE__) && defined(__MACH__)
+#define MG__APPLE__H__
+#include <stdlib.h>
+#include <sys/stat.h>
+#define st_atim st_atimespec
+#define st_ctim st_ctimespec
+#define st_mtim st_mtimespec
+#define LOGIN_NAME_MAX 9
+#define pledge(p, e) 1
+static inline void *reallocarray(void *p, size_t n, size_t z) {
+    if (!(n && z)) return NULL; // Ensure valid sizes
+    if ((SIZE_MAX / z) < n) return NULL; // Ensure no overflow
+    return realloc(p, n * z);
+}
+#endif
+
 #include	"chrdef.h"
 
 typedef int	(*PF)(int, int);	/* generally useful type */
@@ -324,7 +340,9 @@ SLIST_HEAD(vhead, varentry);
 /*
  * Previously from ttydef.h
  */
+#if !defined(__APPLE__) && !defined(__MACH__)
 #define STANDOUT_GLITCH			/* possible standout glitch	*/
+#endif
 
 #define putpad(str, num)	tputs(str, num, ttputc)
 
