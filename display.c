@@ -53,7 +53,6 @@ struct score {
 
 void	vtmove(int, int);
 void	vtputc(int, struct mgwin *);
-void	vtpute(int, struct mgwin *);
 int	vtputs(const char *, struct mgwin *);
 void	vteeol(void);
 void	updext(int, int);
@@ -322,44 +321,10 @@ vtputc(int c, struct mgwin *wp)
 		target = ntabstop(vtcol, wp->w_bufp->b_tabw);
 		do {
 			vtputc(' ', wp);
-		} while (vtcol < ncol && vtcol < target);
+		} while (vtcol < ncol && (vtcol + lbound) < target);
 	} else if (ISCTRL(c)) {
 		vtputc('^', wp);
 		vtputc(CCHR(c), wp);
-	} else if (isprint(c))
-		vp->v_text[vtcol++] = c;
-	else {
-		char bf[5];
-
-		snprintf(bf, sizeof(bf), "\\%o", c);
-		vtputs(bf, wp);
-	}
-}
-
-/*
- * Put a character to the virtual screen in an extended line.  If we are not
- * yet on left edge, don't print it yet.  Check for overflow on the right
- * margin.
- */
-void
-vtpute(int c, struct mgwin *wp)
-{
-	struct video *vp;
-	int target;
-
-	c &= 0xff;
-
-	vp = vscreen[vtrow];
-	if (vtcol >= ncol)
-		vp->v_text[ncol - 1] = '$';
-	else if (c == '\t') {
-		target = ntabstop(vtcol + lbound, wp->w_bufp->b_tabw);
-		do {
-			vtpute(' ', wp);
-		} while (((vtcol + lbound) < target) && vtcol < ncol);
-	} else if (ISCTRL(c) != FALSE) {
-		vtpute('^', wp);
-		vtpute(CCHR(c), wp);
 	} else if (isprint(c)) {
 		if (vtcol >= 0)
 			vp->v_text[vtcol] = c;
@@ -369,7 +334,7 @@ vtpute(int c, struct mgwin *wp)
 
 		snprintf(bf, sizeof(bf), "\\%o", c);
 		for (cp = bf; *cp != '\0'; cp++)
-			vtpute(*cp, wp);
+			vtputc(*cp, wp);
 	}
 }
 
@@ -680,7 +645,7 @@ updext(int currow, int curcol)
 	vtmove(currow, -lbound);		/* start scanning offscreen */
 	lp = curwp->w_dotp;			/* line to output */
 	for (j = 0; j < llength(lp); ++j)	/* until the end-of-line */
-		vtpute(lgetc(lp, j), curwp);
+		vtputc(lgetc(lp, j), curwp);
 	vteeol();				/* truncate the virtual line */
 	vscreen[currow]->v_text[0] = '$';	/* and put a '$' in column 1 */
 }
