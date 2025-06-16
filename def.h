@@ -355,6 +355,7 @@ SLIST_HEAD(vhead, varentry);
 
 /* tty.c X */
 void		 ttinit(void);
+void		 ttsupportdetect(void);
 void		 ttreinit(void);
 void		 tttidy(void);
 void		 ttmove(int, int);
@@ -794,3 +795,8 @@ extern int		 tceeol;
 extern int		 tcinsl;
 extern int		 tcdell;
 extern int		 rptcount;	/* successive invocation count */
+extern short		 termsupport;
+#define TSCURMOV	 1<<0
+#define TSUTF8		 1<<1
+#define TSUTF8COMBINE	 1<<2
+#define TSUTF8CJK	 1<<3

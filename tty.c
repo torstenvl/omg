@@ -50,6 +50,7 @@ volatile sig_atomic_t	 winch_flag;
 int			 tceeol;
 int			 tcinsl;
 int			 tcdell;
+short			 termsupport;
 
 static void
 winchhandler(int sig)
@@ -454,4 +455,83 @@ charcost(const char *s)
 
 	tputs(s, nrow, fakec);
 	return (cci);
+}
+
+void
+ttsupportdetect(void)
+{
+	unsigned char	c = 0;
+	size_t		row = 0;
+	size_t		col = 0;
+	size_t		len = 0;
+	ssize_t		chk = 0;
+
+	termsupport = 0;
+
+	#define MAKETEST(x) "\e[0G\e[8m" x "\e[28m\e[6n\e[0G"
+	static const char testansi[] = MAKETEST("test");
+	static const char testutf8[] = MAKETEST("\xC3\xA7\xC3\xA9");
+	static const char testcombining[] = MAKETEST("c\xCC\xA7""e\xCC\x81");
+	static const char testcjk[] = MAKETEST("\xE9\xBC\x80");
+	#undef MAKETEST
+
+	chk = write(STDOUT_FILENO, testansi, 25);
+	if (chk != 25)
+		return;;
+	chk = read(STDIN_FILENO, &c, 1);
+	if (chk < 1)
+		return;
+	if (c != '\e')
+		return;
+	chk = scanf("[%zu;%zuR", &row, &col);
+	if (chk != 2)
+		return;
+	if (col == 4 + 1)
+		termsupport |= TSCURMOV;
+	else
+		return;
+
+	chk = write(STDOUT_FILENO, testutf8, 25);
+	if (chk != 25)
+		return;
+	chk = read(STDIN_FILENO, &c, 1);
+	if (chk < 1)
+		return;
+	if (c != '\e')
+		return;
+	chk = scanf("[%zu;%zuR", &row, &col);
+	if (chk != 2)
+		return;
+	if (col == 2 + 1)
+		termsupport |= TSUTF8;
+	else
+		return;
+
+	chk = write(STDOUT_FILENO, testcombining, 27);
+	if (chk != 27)
+		return;
+	chk = read(STDIN_FILENO, &c, 1);
+	if (chk < 1)
+		return;
+	if (c != '\e')
+		return;
+	chk = scanf("[%zu;%zuR", &row, &col);
+	if (chk != 2)
+		return;
+	if (col == 2 + 1)
+		termsupport |= TSUTF8COMBINE;
+
+	chk = write(STDOUT_FILENO, testcjk, 24);
+	if (chk != 24)
+		return;
+	chk = read(STDIN_FILENO, &c, 1);
+	if (chk < 1)
+		return;
+	if (c != '\e')
+		return;
+	chk = scanf("[%zu;%zuR", &row, &col);
+	if (chk != 2)
+		return;
+	if (col == 2 + 1)
+		termsupport |= TSUTF8CJK;
 }

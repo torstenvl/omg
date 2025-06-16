@@ -242,6 +242,13 @@ vtresize(int force, int newrow, int newcol)
  * as needing full update, and the physical screen
  * is marked as garbage, so all the right stuff happens
  * on the first call to redisplay.
+ *
+ * Additionally, detect whether the terminal supports
+ * ANSI sequences to determine cursor position as a
+ * method of determining display length. If so, use
+ * that to determine whether UTF-8 is supported, both
+ * in precomposed and combining forms, and whether
+ * UTF-8 CJK is supported.
  */
 void
 vtinit(void)
@@ -250,6 +257,7 @@ vtinit(void)
 
 	ttopen();
 	ttinit();
+	ttsupportdetect();
 
 	/*
 	 * ttinit called ttresize(), which called vtresize(), so our data
