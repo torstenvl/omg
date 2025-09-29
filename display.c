@@ -303,6 +303,112 @@ vtmove(int row, int col)
 }
 
 /*
+ * Take a pointer to the beginning of a UTF-8 code unit buffer and the number
+ * of bytes in the buffer and return the code point encoded in the code units.
+ */
+static int 
+utf8cdpt(int c, const unsigned char *s) {
+	if (c == 2) return ((s[0] & 0x1F)<<6  | (s[1] & 0x3F));
+	if (c == 3) return ((s[0] & 0x0F)<<12 | (s[1] & 0x3F)<<6 | (s[2] & 0x3F));
+	if (c == 4) return ((s[0] & 0x07)<<18 | (s[1] & 0x3F)<<12 |
+			    (s[2] & 0x3F)<<6  | (s[3] & 0x3F));
+	panic("utf8cdpt: bad utf8");
+	return -1;
+}
+
+
+// static void 
+// utf8printwidth(int nbytes, const unsigned char * const seq) {
+// 	int cdptsupported = 0;
+// 	int cdpt = utf8cdpt(nbytes, seq);
+// 	char bf[11];
+
+// 	if (0x00A1 <= cdpt && cdpt <= 0x02AF) return 1;
+// 	if (0x0300 <= cdpt && cdpt <= 0x036F)
+// 		if (termsupport & TSUTF8COMBINE)
+// 			return 0;
+// 	if (0x0370 <= cdpt && cdpt <= 0x04FF) return 1;
+
+// 	if (cdpt == 0x200D) return 5; /* '<ZWJ>' */
+// 	if (cdpt == 0x200C) return 6; /* '<ZWNJ>' */
+// 	if (cdpt == 0x200B) return 6; /* '<ZWSP>' */
+// 	return snprintf(bf, sizeof(bf), "<U+%X>", cdpt);
+// }
+
+static int 
+utf8print(int nbytes, const unsigned char * const seq, struct mgwin *wp, struct video *vp) {
+	int cdptsupported = 0;
+	int termwidth;
+	int cdpt = utf8cdpt(nbytes, seq);
+	char bf[11];
+
+	if (0x00A1 <= cdpt && cdpt <= 0x02AF) {
+		termwidth = 1;
+		cdptsupported = 1;
+	} else if (0x0300 <= cdpt && cdpt <= 0x036F) {
+		if (termsupport & TSUTF8COMBINE) {
+			termwidth = 0;
+			cdptsupported = 1;
+		}
+	} else if (0x0370 <= cdpt && cdpt <= 0x04FF) {
+		termwidth = 1;
+		cdptsupported = 1;
+	}
+	
+	if (cdptsupported) {
+		if (vp && vtcol >= 0)
+			for (int i = 0; i < nbytes; i++)
+				vp->v_text[vtcol++] = seq[i];
+	} else {
+		if (cdpt == 0x200D) {
+			termwidth = snprintf(bf, sizeof(bf), "<ZWJ>");
+			if (wp) vtputs(bf, wp);
+		} else if (cdpt == 0x200C) {
+			termwidth = snprintf(bf, sizeof(bf), "<ZWNJ>");
+			if (wp) vtputs(bf, wp);
+		} else if (cdpt == 0x200B) {
+			termwidth = snprintf(bf, sizeof(bf), "<ZWSP>");
+			if (wp) vtputs(bf, wp);
+		} else {
+			termwidth = snprintf(bf, sizeof(bf), "<U+%X>", cdpt);
+			if (wp) vtputs(bf, wp);
+		}
+	}
+	return termwidth;
+}
+
+
+/* 
+ * Check for valid UTF-8. Returns 0 if false; returns 1 if true
+ * so far; returns the number of bytes to process if true and 
+ * complete.
+ */
+static int
+utf8validcheck(const unsigned char * const s) {
+	size_t len;
+	if (s[0] == 0) return 1;
+	else if (s[0] >> 3 == 0x1E /* 0b11110 */) len = 4;
+	else if (s[0] >> 4 == 0x0E /* 0b1110 */)  len = 3;
+	else if (s[0] >> 5 == 0x06 /* 0b110 */)   len = 2;
+	else return 0;
+
+	if (s[1] == 0) return 1;
+	else if (s[1] >> 6 != 0x02 /* 0b10 */) return 0;
+
+	if (len == 2) return 2;
+
+	if (s[2] == 0) return 1;
+	else if (s[2] >> 6 != 0x02 /* 0b10 */) return 0;
+
+	if (len == 3) return 3;
+
+	if (s[3] == 0) return 1;
+	else if (s[3] >> 6 != 0x02 /* 0b10 */) return 0;
+
+	return 4;
+}
+
+/*
  * Write a character to the virtual display,
  * dealing with long lines and the display of unprintable
  * things like control characters. Also expand tabs every 8
@@ -319,6 +425,9 @@ vtputc(int c, struct mgwin *wp)
 {
 	struct video	*vp;
 	int		 target;
+	char		 bf[5];
+	static unsigned char utf8build[4]; /* Static initialized to zero */
+	static unsigned char utf8buildidx;
 
 	c &= 0xff;
 
@@ -333,16 +442,31 @@ vtputc(int c, struct mgwin *wp)
 	} else if (ISCTRL(c)) {
 		vtputc('^', wp);
 		vtputc(CCHR(c), wp);
+	} else if ((c & 0x80) && (termsupport & TSUTF8)) {
+		utf8build[utf8buildidx++] = c;
+
+		int utf8valid = utf8validcheck(utf8build);
+		if (!utf8valid) {
+			/* Invalid UTF-8. Dump the bytes and start over. */
+			for (int i = 0; i < utf8buildidx; i++) {
+				snprintf(bf, sizeof(bf), "\\%o", utf8build[i]);
+				vtputs(bf, wp);
+			}
+			memset(utf8build, 0, sizeof(utf8build));
+			utf8buildidx = 0;
+		} else if (utf8valid > 1) {
+			/* We have a complete UTF-8 sequence */
+			/* utf8valid is the number of bytes to process */
+			utf8print(utf8valid, utf8build, wp, vp);
+			memset(utf8build, 0, sizeof(utf8build));
+			utf8buildidx = 0;
+		}
 	} else if (isprint(c)) {
 		if (vtcol >= 0)
-			vp->v_text[vtcol] = c;
-		++vtcol;
+			vp->v_text[vtcol++] = c;
 	} else {
-		char bf[5], *cp;
-
-		snprintf(bf, sizeof(bf), "\\%o", c);
-		for (cp = bf; *cp != '\0'; cp++)
-			vtputc(*cp, wp);
+		snprintf(bf, sizeof(bf), "\\0%o", c);
+		vtputs(bf, wp);
 	}
 }
 
@@ -483,15 +607,37 @@ update(int modelinecolor)
 	}
 	curcol = 0;
 	i = 0;
+	unsigned char utf8build[4] = {}; 
+	unsigned char utf8buildidx = 0;
+	char bf[5];
 	while (i < curwp->w_doto) {
 		c = lgetc(lp, i++);
 		if (c == '\t') {
 			curcol = ntabstop(curcol, curwp->w_bufp->b_tabw);
-		} else if (ISCTRL(c) != FALSE)
+		} else if (ISCTRL(c)) {
 			curcol += 2;
-		else if (isprint(c))
+		} else if ((c & 0x80) && (termsupport & TSUTF8)) {
+			utf8build[utf8buildidx++] = c;
+
+			int utf8valid = utf8validcheck(utf8build);
+			if (!utf8valid) {
+				/* Invalid UTF-8. Dump the bytes and start over. */
+				for (int i = 0; i < utf8buildidx; i++) {
+					snprintf(bf, sizeof(bf), "\\%o", utf8build[i]);
+					curcol += strlen(bf);
+				}
+				memset(utf8build, 0, sizeof(utf8build));
+				utf8buildidx = 0;
+			} else if (utf8valid > 1) {
+				/* We have a complete UTF-8 sequence */
+				/* utf8valid is the number of bytes to process */
+				curcol += utf8print(utf8valid, utf8build, NULL, NULL);
+				memset(utf8build, 0, sizeof(utf8build));
+				utf8buildidx = 0;
+			}
+		} else if (isprint(c)) {
 			curcol++;
-		else {
+		} else {
 			char bf[5];
 
 			snprintf(bf, sizeof(bf), "\\%o", c);

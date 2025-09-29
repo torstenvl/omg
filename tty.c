@@ -457,81 +457,67 @@ charcost(const char *s)
 	return (cci);
 }
 
+
+size_t strlen(const char *s);
+
+static int 
+termtest(const char * const s, size_t expected)
+{
+	ssize_t		 chk;
+	unsigned char 	 c;
+	size_t		 row;
+	size_t		 col;
+	size_t		 slen = strlen(s);
+
+	// for (slen = 0; s[slen]; slen++);
+
+	write(STDOUT_FILENO, "\e[0G\e[8m", 8); 
+	write(STDOUT_FILENO, s, slen);
+	write(STDOUT_FILENO, "\e[28m\e[6n\e[0G", 13);
+
+	chk = read(STDIN_FILENO, &c, 1);
+	if (chk < 1 || c != '\e')
+		return (0);
+
+	chk = scanf("[%zu;%zuR", &row, &col);
+	if (chk != 2)
+		return (0);
+	
+	return !!(col == 1 + expected);
+}
+
 void
 ttsupportdetect(void)
 {
-	unsigned char	c = 0;
-	size_t		row = 0;
-	size_t		col = 0;
-	size_t		len = 0;
-	ssize_t		chk = 0;
-
 	termsupport = 0;
 
-	#define MAKETEST(x) "\e[0G\e[8m" x "\e[28m\e[6n\e[0G"
-	static const char testansi[] = MAKETEST("test");
-	static const char testutf8[] = MAKETEST("\xC3\xA7\xC3\xA9");
-	static const char testcombining[] = MAKETEST("c\xCC\xA7""e\xCC\x81");
-	static const char testcjk[] = MAKETEST("\xE9\xBC\x80");
-	#undef MAKETEST
+	// termsupport |= (termtest("test", 4)) ? TSCURMOV : 0;
 
-	chk = write(STDOUT_FILENO, testansi, 25);
-	if (chk != 25)
-		return;;
-	chk = read(STDIN_FILENO, &c, 1);
-	if (chk < 1)
-		return;
-	if (c != '\e')
-		return;
-	chk = scanf("[%zu;%zuR", &row, &col);
-	if (chk != 2)
-		return;
-	if (col == 4 + 1)
-		termsupport |= TSCURMOV;
-	else
-		return;
+	// Test UTF-8 support with precomposed çé 
+	//      - renders as Ã§Ã© in Windows-1252/1254/1270,ISO 8859-1,ISO 8859-15
+	//      - renders as √ß√© in Mac Roman
+	//      - renders as ├º├⌐ in DOS 437
+	//      - renders as ├º├® in DOS 850
+	//      - renders as Ă§Ă© in Windows-1250/1258,ISO 8859-2
+	//      - renders as Г§Г© in Windows-1251 and variants,KZ-1048,CP1174
+	//      - renders as Γ§Γ© in Windows-1253
+	//      - renders as أ§أ© in Windows-1256
+	//      - renders as Ć§Ć© in Windows-1257
+	//      - renders as Γ§Γ© in Windows-1253
+	//      - renders as Γ§Γ© in Windows-1253
+	//      - renders as 
+	// 
+// ﾃｧﾃｧ
+	//  in ShiftJIS
+	// In other words, the cursor will move two spaces for UTF-8, and four for
+	// almost any other encoding.
 
-	chk = write(STDOUT_FILENO, testutf8, 25);
-	if (chk != 25)
-		return;
-	chk = read(STDIN_FILENO, &c, 1);
-	if (chk < 1)
-		return;
-	if (c != '\e')
-		return;
-	chk = scanf("[%zu;%zuR", &row, &col);
-	if (chk != 2)
-		return;
-	if (col == 2 + 1)
-		termsupport |= TSUTF8;
-	else
-		return;
-
-	chk = write(STDOUT_FILENO, testcombining, 27);
-	if (chk != 27)
-		return;
-	chk = read(STDIN_FILENO, &c, 1);
-	if (chk < 1)
-		return;
-	if (c != '\e')
-		return;
-	chk = scanf("[%zu;%zuR", &row, &col);
-	if (chk != 2)
-		return;
-	if (col == 2 + 1)
-		termsupport |= TSUTF8COMBINE;
-
-	chk = write(STDOUT_FILENO, testcjk, 24);
-	if (chk != 24)
-		return;
-	chk = read(STDIN_FILENO, &c, 1);
-	if (chk < 1)
-		return;
-	if (c != '\e')
-		return;
-	chk = scanf("[%zu;%zuR", &row, &col);
-	if (chk != 2)
-		return;
-	if (col == 2 + 1)
-		termsupport |= TSUTF8CJK;
+	termsupport |= (termtest("\xC3\xA7\xC3\xA9", 2)) ? TSUTF8 : 0;
+	termsupport |= (termtest("c\xCC\xA7""e\xCC\x81", 2)) ? TSUTF8COMBINE : 0;
+			/* Test CJK with a safe 3-byte character */
+		/* 五 (U+4E94, "five") - E4 BA 94 */
+		/* UTF-8+CJK: 2 cols, UTF-8 no CJK: 1 col, no UTF-8: 3 cols */
+		if (termtest("\xE4\xBA\x94", 2))
+			termsupport |= TSUTF8CJK;
+	// termsupport |= (termtest("\xE9\xBC\x80", 2)) ? TSUTF8CJK : 0;
 }
